@@ -1,0 +1,44 @@
+import tweepy
+import pandas as pd
+import time
+
+
+client = tweepy.Client(bearer_token='Bearer_Token') 
+
+
+username = 'MUnitedFR'
+keyword = 'OFFICIEL'
+
+try:
+
+    user = client.get_user(username=username)
+    user_id = user.data.id
+
+
+    tweets = client.get_users_tweets(
+        id=user_id, 
+        tweet_fields=['created_at', 'text'], 
+        max_results=10  
+    )
+
+
+    if tweets.data:
+        filtered_tweets = [tweet for tweet in tweets.data if keyword.lower() in tweet.text.lower()]
+        
+
+        data = {
+            'Date et Heure': [tweet.created_at for tweet in filtered_tweets],
+            'Tweet': [tweet.text for tweet in filtered_tweets]
+        }
+        df = pd.DataFrame(data)
+
+
+        print(df)
+    else:
+        print("Aucun tweet trouvé pour cet utilisateur.")
+
+except tweepy.TooManyRequests as e:
+    print("Limite de requêtes atteinte. Attente de 15 minutes avant de réessayer...")
+    time.sleep(900) 
+except tweepy.TweepyException as e:
+    print(f"Erreur : {e}")
