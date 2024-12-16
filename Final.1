@@ -1,0 +1,180 @@
+import google.generativeai as genai
+import os
+import tweepy
+import pandas as pd
+import time
+import requests
+import datetime
+
+bearer_Token = 'x'
+
+client = tweepy.Client(bearer_token= bearer_Token) 
+
+
+username = '_FootTransfert'
+keyword = 'here we go'
+keyword2 = "accord"
+
+try:
+
+    user = client.get_user(username=username)
+    user_id = user.data.id
+
+
+    tweets = client.get_users_tweets(
+        id=user_id, 
+        tweet_fields=['created_at', 'text'], 
+        max_results = 5  
+    )
+
+
+    if tweets.data:
+        filtered_tweets = [tweet for tweet in tweets.data if keyword.lower() or keyword2.lower() in tweet.text.lower()]
+        
+
+        data = {
+            'Date et Heure': [tweet.created_at for tweet in filtered_tweets],
+            'Tweet': [tweet.text for tweet in filtered_tweets]
+        }
+        df = pd.DataFrame(data)
+
+        # Affiche le DataFrame
+        print(df)
+
+except tweepy.TweepyException as e:
+    print(f"Erreur : {e}")
+
+def get_rate_limit_info():
+    url = 'https://api.twitter.com/2/tweets/search/recent'
+    params = {'query': 'OFFICIEL', 'max_results': 10}
+    headers = {'Authorization': f'Bearer {bearer_Token}'}
+    
+    response = requests.get(url, headers=headers, params=params)
+    
+    if response.status_code == 200:
+        # Pas d'erreur, traiter la réponse normalement
+        print("Réponse reçue avec succès !")
+        return response
+    elif response.status_code == 429:
+        # Si l'erreur est 429, obtenir les en-têtes pour savoir quand réessayer
+        reset_timestamp = int(response.headers.get('x-rate-limit-reset'))
+        reset_time = datetime.datetime.utcfromtimestamp(reset_timestamp)
+        current_time = datetime.datetime.utcnow()
+        time_left = reset_time - current_time
+        
+        print(f"Erreur 429: Trop de requêtes. Essayez après {time_left}.")
+        print(f"Heure de réinitialisation: {reset_time}")
+        
+        # Attendre jusqu'à la réinitialisation des limites
+        time.sleep(time_left.total_seconds())  # Attendre jusqu'à la réinitialisation
+        
+        # Réessayer après la période d'attente
+        return get_rate_limit_info()
+    else:
+        # Autres erreurs
+        print(f"Erreur {response.status_code} : {response.text}")
+        return None
+
+# Appel de la fonction pour vérifier les limites de requêtes et récupérer des tweets
+get_rate_limit_info()
+
+# Configuration de l'API
+genai.configure(api_key="w")
+model = genai.GenerativeModel('gemini-1.5-flash')
+
+
+# Réponses générées
+response = []
+
+if len(filtered_tweets) > 0 :
+    for tweet in filtered_tweets:
+        # Génération de la réponse
+        generated = model.generate_content(
+            f"Peux-tu me dire qui est transféré de quel club à quel club (Libre si le joueur est libre de tout contrat). Je veux que la réponse soit dans le format : Joueur (nom+prenom) : Club de Départ - Club d'Arrivée. L'information est dans le tweet suivant : {tweet} si le tweet ne contient pas d'infos sur un transfert, ne renvoie rien"
+        )
+        response.append(generated.text)
+
+# Création du fichier HTML
+filename = 'transferts.html'
+
+# Génération du contenu HTML
+html_content = """
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transferts de Joueurs</title>
+    <style>
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #f4f4f4;
+        }
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+    </style>
+</head>
+<body>
+    <h1>Transferts de Joueurs</h1>
+    <table>
+        <thead>
+            <tr>
+                <th>Nom</th>
+                <th>Prénom</th>
+                <th>Club de Départ</th>
+                <th>Club d'Arrivée</th>
+            </tr>
+        </thead>
+        <tbody>
+"""
+
+if len(response) > 0:
+
+    # Traitement de chaque réponse générée
+    for res in response:
+        try:
+            # Extraction des informations avec une structure connue
+            # Exemple attendu : "Lionel Messi : PSG - Inter Miami"
+            joueur, clubs = res.split(':')
+            nom_prenom = joueur.strip().split()
+            nom = nom_prenom[1]
+            prenom = nom_prenom[0]
+
+            # Extraction des clubs
+            clubs_split = clubs.split('-')
+            club_depart = clubs_split[0].strip()
+            club_arrivee = clubs_split[1].strip()
+
+            # Ajout d'une ligne à la table HTML
+            html_content += f"""
+                <tr>
+                    <td>{nom}</td>
+                    <td>{prenom}</td>
+                    <td>{club_depart}</td>
+                    <td>{club_arrivee}</td>
+                </tr>
+            """
+        except Exception as e:
+            print(f"Erreur de traitement pour la réponse : {res}. Détails : {e}")
+
+    # Fermeture du tableau et du fichier HTML
+    html_content += """
+            </tbody>
+        </table>
+    </body>
+    </html>
+    """
+
+    with open(filename, 'w', encoding='utf-8') as file:
+        file.write(html_content)
+
+    print(f"Fichier HTML généré : {filename}")
